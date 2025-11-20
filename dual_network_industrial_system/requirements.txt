@@ -1,0 +1,23 @@
+# Python Requirements for Dual Network Industrial System
+
+# Serial Communication
+pyserial>=3.5
+
+# Modbus RTU Protocol (for SHT20)
+pymodbus>=3.5.4
+
+# GUI Framework
+PyQt5>=5.15.10
+
+# Plotting for realtime graphs
+pyqtgraph>=0.13.3
+
+# Data handling
+numpy>=1.24.3
+pandas>=2.0.3
+
+# Logging
+python-dateutil>=2.8.2
+
+# CRC calculation (for FASTECH protocol)
+crcmod>=1.7

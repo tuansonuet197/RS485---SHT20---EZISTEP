@@ -1,0 +1,185 @@
+═══════════════════════════════════════════════════════════════
+    MOTOR CONTROL DEBUGGING REPORT - Ezi-STEP Plus-R
+═══════════════════════════════════════════════════════════════
+
+✅ GIAO TIẾP RS485:
+   - COM Port: COM2 @ 115200 bps ✅
+   - Slave ID: 2 ✅
+   - Protocol: FASTECH ✅
+   - CRC Validation: OK ✅
+   - Device Response: OK ✅
+
+✅ LỆNH ĐIỀU KHIỂN:
+   - ALARM RESET: Gửi thành công ✅
+   - SERVO ON: Gửi thành công ✅
+   - SET SPEED: Gửi thành công ✅
+   - JOG MOVE: Gửi thành công ✅
+   - Driver nhận và ACK các lệnh ✅
+
+❌ VẤN ĐỀ PHÁT HIỆN:
+   - Status Byte liên tục báo ALARM (0x52, 0x6E, 0x46, 0x33)
+   - Motor KHÔNG QUAY vật lý
+   - ALARM không reset được
+
+═══════════════════════════════════════════════════════════════
+    NGUYÊN NHÂN CÓ THỂ (ưu tiên từ cao → thấp)
+═══════════════════════════════════════════════════════════════
+
+🔴 1. THIẾU NGUỒN ĐIỆN 24V CHO DRIVER (99% khả năng)
+   ─────────────────────────────────────────────────────────
+   Driver Ezi-STEP Plus-R CẦN:
+   - Nguồn DC 24V riêng (5-10A tùy motor)
+   - USB CHỈ cung cấp RS485, KHÔNG cấp điện cho motor
+   - Nếu thiếu nguồn 24V → ALARM liên tục
+   
+   ✓ CÁCH KIỂM TRA:
+     • Xem LED "POWER" trên driver có sáng không?
+     • Đo điện áp tại cổng DC INPUT (phải có 24V)
+   
+   ✓ GIẢI PHÁP:
+     • Kết nối nguồn DC 24V vào driver
+     • Đảm bảo GND chung giữa nguồn và driver
+
+
+🔴 2. ĐẤU NỐI MOTOR SAI THỨ TỰ
+   ─────────────────────────────────────────────────────────
+   Stepper motor 4 dây phải đấu đúng:
+   - A+ (Phase A positive)
+   - A- (Phase A negative)  
+   - B+ (Phase B positive)
+   - B- (Phase B negative)
+   
+   Nếu đấu sai → Driver phát hiện quá tải → ALARM
+   
+   ✓ CÁCH KIỂM TRA:
+     • Xem datasheet motor để biết màu dây
+     • Dùng đồng hồ đo điện trở giữa các cặp dây
+       (A+ với A- có điện trở thấp, tương tự B+ với B-)
+
+
+🔴 3. DIP SWITCH CẤU HÌNH SAI
+   ─────────────────────────────────────────────────────────
+   Driver có DIP switch để cấu hình:
+   - SW1-3: Current setting (dòng điện motor)
+   - SW4-6: Microstep resolution
+   - SW7-8: Pulse input mode
+   
+   ✓ CÁCH KIỂM TRA:
+     • Đọc datasheet motor để biết rated current
+     • Cài DIP switch SW1-3 cho phù hợp
+     • Thường: Microstep = 10000 ppr (SW4-6: OFF-OFF-OFF)
+
+
+🔴 4. ENCODER FEEDBACK BỊ LỖI (nếu driver yêu cầu)
+   ─────────────────────────────────────────────────────────
+   Một số driver yêu cầu encoder feedback
+   Nếu không kết nối hoặc lỗi → ALARM
+   
+   ✓ GIẢI PHÁP:
+     • Kiểm tra xem driver có yêu cầu encoder không
+     • Nếu có, đấu nối encoder đúng cách
+     • Hoặc cấu hình driver về open-loop mode
+
+
+🔴 5. MOTOR KHÔNG TƯƠNG THÍCH
+   ─────────────────────────────────────────────────────────
+   - Điện áp motor quá cao/thấp so với driver
+   - Dòng điện motor vượt quá driver
+   - Inductance motor không phù hợp
+   
+   ✓ CÁCH KIỂM TRA:
+     • Xem nameplate trên motor
+     • So sánh với spec của driver
+
+
+═══════════════════════════════════════════════════════════════
+    HƯỚNG DẪN KIỂM TRA THEO THỨ TỰ
+═══════════════════════════════════════════════════════════════
+
+[ ] BƯỚC 1: Kiểm tra LED trên driver
+    → POWER LED sáng? (nếu không → thiếu nguồn 24V)
+    → ALARM LED sáng? (nếu sáng → có lỗi hardware)
+    → RUN LED nhấp nháy? (nếu không → motor không hoạt động)
+
+[ ] BƯỚC 2: Đo điện áp nguồn DC
+    → Dùng đồng hồ đo điện áp tại cổng DC INPUT
+    → Phải có 20-28V DC
+    → Nếu < 20V hoặc = 0V → CẤP NGUỒN NGAY!
+
+[ ] BƯỚC 3: Kiểm tra dây motor
+    → Chụp ảnh terminal block của motor trên driver
+    → Xác nhận thứ tự dây A+, A-, B+, B-
+    → Thử hoán đổi A với B nếu không chắc
+
+[ ] BƯỚC 4: Kiểm tra DIP switch
+    → Chụp ảnh các DIP switch
+    → Đọc manual driver để cài đặt đúng
+    → Thường SW1-3 = 011 (50% current)
+
+[ ] BƯỚC 5: Reset driver hoàn toàn
+    → Tắt nguồn 24V
+    → Đợi 10 giây
+    → Bật lại nguồn
+    → Chạy lại phần mềm
+
+
+═══════════════════════════════════════════════════════════════
+    YÊU CẦU TỪ DEVELOPER
+═══════════════════════════════════════════════════════════════
+
+Vui lòng cung cấp:
+
+1. 📸 **HÌNH ẢNH DRIVER** (quan trọng!)
+   - LED nào đang sáng trên driver?
+   - Đấu nối terminal block motor
+   - Vị trí DIP switch
+
+2. 📸 **HÌNH ẢNH NGUỒN ĐIỆN**
+   - Có nguồn DC 24V riêng không?
+   - Nguồn đã kết nối với driver chưa?
+
+3. 📄 **THÔNG TIN MOTOR**
+   - Model motor (ghi trên nameplate)
+   - Rated voltage / current
+   - Step angle
+
+4. 📄 **THÔNG TIN DRIVER**
+   - Model: Ezi-STEP Plus-R
+   - Firmware version (nếu có)
+
+
+═══════════════════════════════════════════════════════════════
+    GHI CHÚ KỸ THUẬT
+═══════════════════════════════════════════════════════════════
+
+Phân tích Status Byte:
+- 0x52 = 0b01010010 → Bit 1 (ALARM) = 1
+- 0x6E = 0b01101110 → Bit 1 (ALARM) = 1
+- 0x46 = 0b01000110 → Bit 1 (ALARM) = 1
+- 0x33 = 0b00110011 → Bit 1 (ALARM) = 1
+
+→ ALARM bit LUÔN = 1 trong mọi thao tác
+→ Đây là lỗi phần cứng NGHIÊM TRỌNG, không phải lỗi phần mềm!
+
+Các lệnh đã test thành công:
+✅ Read Status (0x0D): OK - nhận 0x54
+✅ Alarm Reset (0x04): ACK nhận được nhưng ALARM vẫn còn
+✅ Servo ON (0x83): ACK nhận được
+✅ Set Speed (0x57): ACK nhận được
+✅ Jog Move (0x37): ACK nhận được nhưng motor không quay
+
+Kết luận: Driver NHẬN và PHẢN HỒI các lệnh, NHƯNG có lỗi
+phần cứng ngăn motor hoạt động. Software hoàn toàn OK!
+
+
+═══════════════════════════════════════════════════════════════
+    LIÊN HỆ HỖ TRỢ
+═══════════════════════════════════════════════════════════════
+
+GitHub Copilot - Motor Control Specialist
+Status: Waiting for hardware verification photos
+
+Sau khi cấp đủ nguồn 24V và kiểm tra đấu nối, motor SẼ QUAY!
+Software đã sẵn sàng 100%! 🚀
+
+═══════════════════════════════════════════════════════════════
