@@ -1,8 +1,9 @@
 """
-Cấu hình hệ thống - Dual Network Industrial System
+Cấu hình hệ thống - Bài tập lớn môn Kiến trúc máy tính và mạng truyền thông công nghiệp
+Hệ thống giám sát và điều khiển công nghiệp qua 2 mạng RS-485 độc lập
 """
 
-# ==================== NHÁNH 1: SHT20 MODBUS RTU ====================
+# ==================== MẠNG 1: SHT20 - MODBUS RTU @ 9600 BPS ====================
 SHT20_CONFIG = {
     'port': 'COM1',              # Cổng COM cho SHT20
     'baudrate': 9600,            # Tốc độ truyền
@@ -32,7 +33,7 @@ SHT20_CONFIG = {
     'read_interval': 1000
 }
 
-# ==================== NHÁNH 2: EZI-STEP FASTECH ====================
+# ==================== MẠNG 2: EZI-STEP - FASTECH PROTOCOL @ 115200 BPS ====================
 EZISTEP_CONFIG = {
     'port': 'COM2',              # Cổng COM cho Ezi-STEP
     'baudrate': 115200,          # Tốc độ truyền cao
@@ -77,7 +78,7 @@ EZISTEP_CONFIG = {
 
 # ==================== GUI SETTINGS ====================
 GUI_CONFIG = {
-    'window_title': 'Hệ Thống Tự Động Hóa Công Nghiệp - Mạng Kép',
+    'window_title': 'Bài tập lớn: Hệ thống giám sát & điều khiển - Mạng RS-485 kép',
     'window_size': (1200, 800),
     'refresh_rate': 100,         # ms (cập nhật GUI)
     

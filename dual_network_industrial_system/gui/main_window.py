@@ -79,8 +79,8 @@ class MainWindow(QMainWindow):
             self.config['GUI_CONFIG']
         )
         
-        self.tabs.addTab(self.sht20_tab, "🌡️ SHT20 - Giám Sát Môi Trường")
-        self.tabs.addTab(self.ezistep_tab, "⚙️ Ezi-STEP - Điều Khiển Động Cơ")
+        self.tabs.addTab(self.sht20_tab, "🌡️ Mạng 1: SHT20 - Giám Sát Môi Trường")
+        self.tabs.addTab(self.ezistep_tab, "⚙️ Mạng 2: Ezi-STEP - Điều Khiển Động Cơ")
         
         self.setCentralWidget(self.tabs)
         
@@ -183,30 +183,42 @@ class MainWindow(QMainWindow):
     def show_about(self):
         """Hiển thị thông tin về ứng dụng"""
         about_text = """
-        <h2>Hệ Thống Tự Động Hóa Công Nghiệp</h2>
-        <h3>Mạng Kép Độc Lập</h3>
-        <p><b>Phiên bản:</b> 1.0</p>
-        <p><b>Ngày:</b> November 2025</p>
+        <h2>🏫 BÀI TẬP LỚN</h2>
+        <h3>Hệ Thống Giám Sát & Điều Khiển Công Nghiệp</h3>
+        
+        <p><b>Môn học:</b> Kiến trúc máy tính và mạng truyền thông công nghiệp</p>
+        <p><b>Lớp:</b> INT 2013 44</p>
+        
+        <h4>👨‍🏫 Giảng viên hướng dẫn:</h4>
+        <ul>
+            <li>ThS. Đặng Anh Việt</li>
+            <li>ThS. Nguyễn Quang Nhã</li>
+        </ul>
+        
+        <h4>👨‍🎓 Sinh viên thực hiện:</h4>
+        <p><b>Họ tên:</b> Nguyễn Tuấn Sơn</p>
+        <p><b>MSV:</b> 23021335</p>
+        
+        <hr>
         
         <h4>Tính năng:</h4>
         <ul>
-            <li>🌡️ Giám sát môi trường với SHT20 (Modbus RTU @ 9600 bps)</li>
-            <li>⚙️ Điều khiển động cơ với Ezi-STEP Plus-R (FASTECH @ 115200 bps)</li>
-            <li>📊 Đồ thị realtime</li>
+            <li>🌡️ Mạng 1: Cảm biến SHT20 (Modbus RTU @ 9600 bps)</li>
+            <li>⚙️ Mạng 2: Động cơ Ezi-STEP (FASTECH @ 115200 bps)</li>
+            <li>📊 Đồ thị thời gian thực</li>
             <li>📝 Ghi log dữ liệu CSV</li>
-            <li>🎨 Giao diện đẹp mắt, dễ sử dụng</li>
         </ul>
         
         <h4>Công nghệ:</h4>
         <ul>
-            <li>Python 3.8+</li>
-            <li>PyQt5 (GUI)</li>
-            <li>PyModbus (Modbus RTU)</li>
-            <li>PySerial (RS485)</li>
-            <li>PyQtGraph (Plotting)</li>
+            <li>Python 3.8+ (Multi-threading)</li>
+            <li>PyQt5 (GUI Framework)</li>
+            <li>PyModbus (Modbus RTU Protocol)</li>
+            <li>PySerial (RS-485 Communication)</li>
+            <li>PyQtGraph (Real-time Plotting)</li>
         </ul>
         
-        <p><i>Được phát triển cho Hệ thống Tự động hóa Công nghiệp</i></p>
+        <p><b>Phiên bản:</b> 1.0 | <b>Ngày:</b> Tháng 11/2025</p>
         """
         
         QMessageBox.about(self, "Giới thiệu", about_text)

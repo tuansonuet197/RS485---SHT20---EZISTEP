@@ -1,6 +1,9 @@
 """
-Ứng dụng chính - Hệ Thống Tự Động Hóa Công Nghiệp
-Dual Network Industrial System
+BÀI TẬP LỚN: HỆ THỐNG GIÁM SÁT VÀ ĐIỀU KHIỂN CÔNG NGHIỆP
+Môn: Kiến trúc máy tính và mạng truyền thông công nghiệp
+
+Mô tả: Ứng dụng giám sát cảm biến SHT20 và điều khiển động cơ Ezi-STEP
+qua 2 mạng RS-485 độc lập (Modbus RTU & FASTECH Protocol)
 
 Chạy ứng dụng:
     python main.py
@@ -34,10 +37,11 @@ def main():
     setup_console_logging(level=logging.DEBUG)
     logger = logging.getLogger(__name__)
     
-    logger.info("=" * 60)
-    logger.info("HỆ THỐNG TỰ ĐỘNG HÓA CÔNG NGHIỆP - MẠNG KÉP")
-    logger.info("=" * 60)
-    logger.info("Khởi động ứng dụng...")
+    logger.info("=" * 70)
+    logger.info("BÀI TẬP LỚN - KIẺN TRÚC MÁY TÍNH VÀ MẠNG TRUYỀN THÔNG CÔNG NGHIỆP")
+    logger.info("HỆ THỐNG GIÁM SÁT VÀ ĐIỀU KHIỂN - MẠNG KÉP RS-485")
+    logger.info("=" * 70)
+    logger.info("Khởi động hệ thống...")
     
     try:
         # Khởi tạo drivers
@@ -75,10 +79,11 @@ def main():
         main_window.show()
         logger.info("✅ Ứng dụng đã sẵn sàng!")
         logger.info("")
-        logger.info("Hướng dẫn sử dụng:")
-        logger.info("1. Tab SHT20: Nhấn 'Kết nối' để kết nối cảm biến")
-        logger.info("2. Tab Ezi-STEP: Nhấn 'Kết nối' -> 'Servo ON' để bật động cơ")
-        logger.info("3. Menu File: Bật/Tắt logging dữ liệu")
+        logger.info("📚 HƯớng dẫn sử dụng:")
+        logger.info("  1. Tab 'Cảm biến SHT20': Nhấn 'Kết nối' để kết nối mạng Modbus RTU")
+        logger.info("  2. Tab 'Động cơ Ezi-STEP': Nhấn 'Kết nối' -> 'SERVO ON' để bật mạng FASTECH")
+        logger.info("  3. Menu 'File': Bật/Tắt ghi log dữ liệu (CSV format)")
+        logger.info("  4. Quan sát đồ thị thời gian thực và kiểm tra trạng thái thiết bị")
         logger.info("")
         
         # Run application

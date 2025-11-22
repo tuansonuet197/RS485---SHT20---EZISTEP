@@ -1,6 +1,14 @@
 """
-Driver cho Bộ điều khiển động cơ Ezi-STEP Plus-R - Giao thức FASTECH
-Hỗ trợ điều khiển động cơ bước qua RS485 tốc độ cao
+Driver Động cơ Bước Ezi-STEP Plus-R - FASTECH Protocol
+Bài tập lớn: Kiến trúc máy tính và mạng truyền thông công nghiệp
+
+Triển khai:
+- Giao thức FASTECH qua RS-485 @ 115200 bps
+- Byte stuffing/destuffing (duplicate 0xAA)
+- CRC-16 (Modbus RTU standard)
+- Điều khiển chuyển động: JOG, Absolute, Relative, Homing
+
+Tham khảo: FASTECH Ezi-STEP Plus-R Communication Manual
 """
 import logging
 import serial
@@ -14,22 +22,15 @@ logger = logging.getLogger(__name__)
 
 class FastechCommand(IntEnum):
     """Mã lệnh FASTECH Protocol"""
-    JOG_MOVE = 0x37
+    MOVE_VELOCITY = 0x37  # JOG/Move with velocity
     MOVE_ABSOLUTE = 0x38
     MOVE_RELATIVE = 0x39
     STOP = 0x31
     SERVO_ON = 0x83
     SERVO_OFF = 0x84
-    HOMING = 0x23
+    ALARM_RESET = 0x04
     READ_POSITION = 0x0C
     READ_STATUS = 0x0D
-    SET_SPEED = 0x57
-    ALARM_RESET = 0x04  # Reset alarm/error
-    SET_POSITION = 0x24  # Set current position (giả lập đã home)
-    CLEAR_POSITION = 0x20  # Clear position counter
-    TEACHING_MODE = 0xA0  # Bật teaching mode (bỏ qua homing)
-    WRITE_PARAM = 0x58   # Write parameter to EEPROM
-    READ_PARAM = 0x52    # Read parameter from EEPROM
 
 
 class MotorStatus(IntEnum):
@@ -56,6 +57,11 @@ class EziStepFastechDriver:
         self.is_connected = False
         self._current_position = 0
         self._current_status = MotorStatus.IDLE
+        
+        # Protocol constants
+        self.HEADER = bytes([0xAA, 0x55])
+        self.TAIL = bytes([0xAA, 0x0D])
+        self.SLAVE_ID = config['slave_id']
         
         logger.info("Ezi-STEP Driver initialized")
     
@@ -113,12 +119,12 @@ class EziStepFastechDriver:
             self.is_connected = False
             logger.info("Đã ngắt kết nối Ezi-STEP")
     
-    def _calculate_crc(self, data: List[int]) -> int:
+    def _calculate_crc(self, data: bytes) -> int:
         """
-        Tính CRC-16 cho gói tin FASTECH
+        Tính CRC-16 cho gói tin FASTECH (Modbus RTU CRC)
         
         Args:
-            data: Danh sách byte cần tính CRC
+            data: Byte cần tính CRC
             
         Returns:
             int: Giá trị CRC 16-bit
@@ -133,43 +139,69 @@ class EziStepFastechDriver:
                     crc >>= 1
         return crc
     
-    def _build_packet(self, frame_type: int, data: List[int] = None) -> bytes:
+    def _byte_stuffing(self, frame_data: bytes) -> bytearray:
         """
-        Xây dựng gói tin FASTECH Protocol
+        Byte stuffing: Thêm 0xAA sau mỗi 0xAA trong data
+        
+        Args:
+            frame_data: Dữ liệu cần stuffing
+            
+        Returns:
+            bytearray: Dữ liệu đã được stuffing
+        """
+        stuffed_data = bytearray()
+        for byte in frame_data:
+            stuffed_data.append(byte)
+            if byte == 0xAA:
+                stuffed_data.append(0xAA)  # Duplicate 0xAA
+        return stuffed_data
+    
+    def _byte_destuffing(self, stuffed_data: bytes) -> bytearray:
+        """
+        Byte destuffing: Loại bỏ 0xAA thừa
+        
+        Args:
+            stuffed_data: Dữ liệu đã stuffing
+            
+        Returns:
+            bytearray: Dữ liệu gốc
+        """
+        destuffed_data = bytearray()
+        i = 0
+        while i < len(stuffed_data):
+            destuffed_data.append(stuffed_data[i])
+            if stuffed_data[i] == 0xAA and i + 1 < len(stuffed_data) and stuffed_data[i + 1] == 0xAA:
+                i += 1  # Skip duplicate 0xAA
+            i += 1
+        return destuffed_data
+    
+    def _build_packet(self, frame_type: int, data: bytes = b'') -> bytes:
+        """
+        Xây dựng gói tin FASTECH Protocol với byte stuffing
+        
+        Format: HEADER + [SlaveID + FrameType + Data + CRC] + TAIL
+                          └─────── Byte Stuffing ────────┘
         
         Args:
             frame_type: Mã lệnh (Command code)
-            data: Dữ liệu lệnh (nếu có)
+            data: Dữ liệu lệnh (bytes)
             
         Returns:
             bytes: Gói tin hoàn chỉnh
         """
-        if data is None:
-            data = []
+        # 1. Frame core = SlaveID + FrameType + Data
+        frame_core = struct.pack('<B', self.SLAVE_ID) + struct.pack('<B', frame_type) + data
         
-        # Header
-        packet = list(self.config['protocol']['header'])
+        # 2. Tính CRC cho frame_core
+        crc_val = self._calculate_crc(frame_core)
+        crc_bytes = struct.pack('<H', crc_val)
         
-        # Slave ID
-        packet.append(self.config['slave_id'])
+        # 3. Byte stuffing cho (frame_core + CRC)
+        data_to_stuff = frame_core + crc_bytes
+        stuffed_frame_data = self._byte_stuffing(data_to_stuff)
         
-        # Frame Type
-        packet.append(frame_type)
-        
-        # Data Length
-        data_len = len(data)
-        packet.append(data_len)
-        
-        # Data
-        packet.extend(data)
-        
-        # CRC (2 bytes)
-        crc = self._calculate_crc(packet[2:])  # CRC từ Slave ID đến Data
-        packet.append(crc & 0xFF)        # CRC Low
-        packet.append((crc >> 8) & 0xFF) # CRC High
-        
-        # Tail
-        packet.extend(self.config['protocol']['tail'])
+        # 4. Header + Stuffed Data + Tail
+        packet = self.HEADER + stuffed_frame_data + self.TAIL
         
         return bytes(packet)
     
@@ -183,16 +215,16 @@ class EziStepFastechDriver:
         
         return f"0x{status_byte:02X}[{' '.join(status_bits) if status_bits else 'OK'}]"
     
-    def _send_command(self, frame_type: int, data: List[int] = None) -> Optional[bytes]:
+    def _send_command(self, frame_type: int, data: bytes = b'') -> Optional[bytes]:
         """
-        Gửi lệnh và nhận phản hồi
+        Gửi lệnh và nhận phản hồi với byte destuffing
         
         Args:
             frame_type: Mã lệnh
-            data: Dữ liệu lệnh
+            data: Dữ liệu lệnh (bytes)
             
         Returns:
-            bytes: Phản hồi từ driver hoặc None nếu lỗi
+            bytes: Phản hồi từ driver (đã destuffing) hoặc None nếu lỗi
         """
         if not self.is_connected or not self.serial_port:
             logger.warning("Chưa kết nối tới Ezi-STEP")
@@ -201,32 +233,55 @@ class EziStepFastechDriver:
         try:
             # Xây dựng và gửi gói tin
             packet = self._build_packet(frame_type, data)
-            logger.debug(f"Gửi gói tin (Frame: 0x{frame_type:02X}): {packet.hex().upper()}")
+            logger.debug(f"📤 Gửi (0x{frame_type:02X}): {packet.hex().upper()}")
             self.serial_port.write(packet)
             
             # Đợi phản hồi
-            time.sleep(0.1)  # Tăng delay lên 100ms
+            time.sleep(0.05)
             
-            # Đọc phản hồi (tối đa 256 bytes)
+            # Đọc phản hồi
             if self.serial_port.in_waiting > 0:
-                response = self.serial_port.read(self.serial_port.in_waiting)
-                logger.debug(f"Nhận phản hồi ({len(response)} bytes): {response.hex().upper()}")
+                response_raw = self.serial_port.read(self.serial_port.in_waiting)
+                logger.debug(f"📥 Nhận: {response_raw.hex().upper()}")
                 
-                # Decode status byte
-                if len(response) >= 6:
-                    status_byte = response[5]
-                    logger.info(f"   ↳ Status: {self._decode_status_byte(status_byte)}")
+                # Parse response: HEADER + stuffed_data + TAIL
+                if len(response_raw) < 6:
+                    logger.warning("Phản hồi quá ngắn")
+                    return None
                 
-                return response
+                # Remove header and tail
+                if response_raw[:2] == self.HEADER and response_raw[-2:] == self.TAIL:
+                    stuffed_data = response_raw[2:-2]
+                    # Destuffing
+                    destuffed_data = self._byte_destuffing(stuffed_data)
+                    
+                    # Parse: SlaveID + FrameType + Data + CRC
+                    if len(destuffed_data) >= 4:
+                        slave_id = destuffed_data[0]
+                        resp_frame_type = destuffed_data[1]
+                        data_and_crc = destuffed_data[2:]
+                        
+                        # Verify CRC
+                        if len(data_and_crc) >= 2:
+                            received_crc = struct.unpack('<H', data_and_crc[-2:])[0]
+                            calc_crc = self._calculate_crc(destuffed_data[:-2])
+                            
+                            if received_crc == calc_crc:
+                                logger.info(f"✅ CRC OK, Frame: 0x{resp_frame_type:02X}")
+                                return destuffed_data
+                            else:
+                                logger.warning(f"❌ CRC mismatch: {received_crc:04X} != {calc_crc:04X}")
+                    
+                return response_raw
             else:
                 logger.warning(f"Không nhận được phản hồi cho lệnh 0x{frame_type:02X}")
                 return None
                 
         except serial.SerialException as e:
-            logger.error(f"Lỗi Serial khi gửi lệnh: {e}")
+            logger.error(f"Lỗi Serial: {e}")
             return None
         except Exception as e:
-            logger.error(f"Lỗi không xác định khi gửi lệnh: {e}")
+            logger.error(f"Lỗi: {e}")
             return None
     
     def disable_homing_check(self) -> bool:
@@ -365,29 +420,19 @@ class EziStepFastechDriver:
     
     def servo_on(self) -> bool:
         """
-        Bật Servo với đầy đủ khởi tạo (ALARM RESET + SET SPEED)
+        Bật Servo (Enable động cơ)
         
         Returns:
             bool: True nếu thành công
         """
-        logger.info("=" * 50)
-        logger.info("🚀 BẮT ĐẦU QUY TRÌNH SERVO ON")
-        logger.info("=" * 50)
+        logger.info("🔌 SERVO ON...")
         
-        # Bước 0: TẮT yêu cầu homing (quan trọng nhất!)
-        logger.info("📍 Bước 0: Tắt yêu cầu homing...")
-        self.disable_homing_check()
-        time.sleep(0.3)
-        
-        # Bước 1: Reset ALARM nếu có
-        logger.info("📍 Bước 1: Reset ALARM...")
+        # Reset alarm trước
         self.alarm_reset()
-        time.sleep(0.3)
+        time.sleep(0.1)
         
-        # Bước 2: Bật SERVO
-        logger.info("📍 Bước 2: Bật SERVO...")
         response = self._send_command(FastechCommand.SERVO_ON)
-        if not response:
+        if response:
             logger.error("❌ SERVO ON thất bại - không nhận phản hồi")
             return False
         
@@ -462,68 +507,38 @@ class EziStepFastechDriver:
     
     def jog_move(self, speed: int, direction: int = 1) -> bool:
         """
-        Di chuyển Jog (chạy liên tục)
+        Di chuyển Jog (MoveVelocity) - FIXED theo Ezi2.py/Ezi3.py
+        
+        Format: Command 0x37 + Data[Velocity(4 bytes LE) + Direction(1 byte)]
         
         Args:
-            speed: Tốc độ (pps - pulses per second) - khuyến nghị 2000-5000 pps
-            direction: Hướng (1 = CW, 0 = CCW)
+            speed: Tốc độ (pps)
+            direction: 1 = CW, 0 = CCW
             
         Returns:
             bool: True nếu thành công
         """
-        # Gửi lệnh STOP trước để clear trạng thái cũ
-        logger.info("📍 Gửi STOP để clear trạng thái...")
-        self._send_command(FastechCommand.STOP)
-        time.sleep(0.1)
-        
-        # Tăng tốc độ tối thiểu lên 5000 pps để đảm bảo động cơ quay
-        if speed < 5000:
-            logger.warning(f"⚠️ Tốc độ {speed} pps quá thấp! Tự động tăng lên 5000 pps")
+        if speed < 1000:
+            logger.warning(f"⚠️ Tốc độ {speed} pps quá thấp! Tăng lên 5000 pps")
             speed = 5000
         
-        logger.info(f"🏃 JOG {'CW ➡️' if direction > 0 else 'CCW ⬅️'} @ {speed} pps")
+        dir_str = "CW ➡️" if direction > 0 else "CCW ⬅️"
+        logger.info(f"🏃 JOG {dir_str} @ {speed} pps")
         
-        # Kiểm tra tốc độ
-        max_speed = self.config['motor']['max_speed'] * self.config['motor']['resolution'] / 60
-        if speed > max_speed:
-            logger.warning(f"Tốc độ {speed} vượt quá giới hạn {max_speed}")
-            speed = int(max_speed)
+        # Data format theo Ezi2.py/Ezi3.py: Velocity(4 bytes LE) + Direction(1 byte)
+        command_data = struct.pack('<LB', abs(speed), 1 if direction > 0 else 0)
         
-        # Format JOG theo Ezi-STEP datasheet:
-        # Data có thể cần: Speed(4) + Accel(4) + Decel(4) + Direction(1) = 13 bytes
-        # HOẶC chỉ cần: Speed(4) + Direction(1) = 5 bytes
+        logger.debug(f"📦 Data: {command_data.hex().upper()}")
         
-        # THỬ NGHIỆM 1: Chỉ speed + direction (format đơn giản)
-        data = []
-        data.extend(list(struct.pack('<I', abs(speed))))  # 4 bytes speed (little-endian)
-        data.append(1 if direction > 0 else 0)  # 1 byte direction (1=CW, 0=CCW)
+        response = self._send_command(FastechCommand.MOVE_VELOCITY, command_data)
         
-        logger.info(f"📦 Data format: Speed={speed} (0x{speed:08X}), Dir={'CW(1)' if direction > 0 else 'CCW(0)'}")
-        
-        logger.info(f"📤 Gửi JOG: Speed={speed} pps, Direction={'CW' if direction > 0 else 'CCW'}")
-        logger.debug(f"   Data bytes: {[hex(x) for x in data]}")
-        
-        # THỬ NGHIỆM: Dùng JOG command
-        response = self._send_command(FastechCommand.JOG_MOVE, data)
-        
-        if response and len(response) >= 6:
-            status_byte = response[5]
-            # Kiểm tra ALARM bit
-            if status_byte & 0x02:
-                logger.error("❌ JOG COMMAND KHÔNG SUPPORTED! Thử dùng MOVE RELATIVE thay thế...")
-                # Giả lập JOG bằng Move Relative với khoảng cách rất lớn
-                logger.info("🔄 Chuyển sang MOVE RELATIVE mode (giả lập JOG)...")
-                distance = 1000000 if direction > 0 else -1000000  # 1 triệu pulse
-                return self.move_relative(distance, speed)
-            
+        if response:
             self._current_status = MotorStatus.MOVING
-            logger.info("✅ Lệnh Jog đã được chấp nhận - ĐỘNG CƠ NÊN QUAY!")
+            logger.info("✅ JOG command sent successfully")
             return True
         else:
-            logger.error("❌ Driver không chấp nhận lệnh Jog hoặc không phản hồi")
-            logger.info("🔄 Thử MOVE RELATIVE thay thế...")
-            distance = 1000000 if direction > 0 else -1000000
-            return self.move_relative(distance, speed)
+            logger.error("❌ JOG failed")
+            return False
     
     def move_absolute(self, position: int, speed: int) -> bool:
         """
@@ -536,23 +551,21 @@ class EziStepFastechDriver:
         Returns:
             bool: True nếu thành công
         """
-        # Kiểm tra giới hạn
         if not (self.config['limits']['min_position'] <= position <= self.config['limits']['max_position']):
             logger.error(f"Vị trí {position} ngoài giới hạn")
             return False
         
-        # Chuẩn bị dữ liệu: Position (4 bytes) + Speed (4 bytes)
-        data = list(struct.pack('<i', position))  # Signed int
-        data.extend(list(struct.pack('<I', speed)))  # Unsigned int
+        # Data: Position(4 bytes LE) + Speed(4 bytes LE)
+        command_data = struct.pack('<iI', position, speed)
         
         logger.info(f"Move Absolute: Position={position}, Speed={speed}")
-        response = self._send_command(FastechCommand.MOVE_ABSOLUTE, data)
+        response = self._send_command(FastechCommand.MOVE_ABSOLUTE, command_data)
         
         if response:
             self._current_status = MotorStatus.MOVING
             return True
         else:
-            logger.error("Không thể di chuyển tuyệt đối")
+            logger.error("Move absolute failed")
             return False
     
     def move_relative(self, distance: int, speed: int) -> bool:
@@ -566,18 +579,17 @@ class EziStepFastechDriver:
         Returns:
             bool: True nếu thành công
         """
-        # Chuẩn bị dữ liệu: Distance (4 bytes) + Speed (4 bytes)
-        data = list(struct.pack('<i', distance))  # Signed int
-        data.extend(list(struct.pack('<I', speed)))  # Unsigned int
+        # Data: Distance(4 bytes LE) + Speed(4 bytes LE)
+        command_data = struct.pack('<iI', distance, speed)
         
         logger.info(f"Move Relative: Distance={distance}, Speed={speed}")
-        response = self._send_command(FastechCommand.MOVE_RELATIVE, data)
+        response = self._send_command(FastechCommand.MOVE_RELATIVE, command_data)
         
         if response:
             self._current_status = MotorStatus.MOVING
             return True
         else:
-            logger.error("Không thể di chuyển tương đối")
+            logger.error("Move relative failed")
             return False
     
     def homing(self, speed: int = 1000) -> bool:
@@ -613,15 +625,16 @@ class EziStepFastechDriver:
         """
         response = self._send_command(FastechCommand.READ_POSITION)
         
-        if response and len(response) >= 11:  # Header(2) + ID(1) + Type(1) + Len(1) + Data(4) + CRC(2)
-            # Parse vị trí từ response (4 bytes data, little-endian)
-            position_bytes = response[5:9]
-            position = struct.unpack('<i', position_bytes)[0]
-            self._current_position = position
-            return position
-        else:
-            logger.debug("Không đọc được vị trí")
-            return None
+        if response and len(response) >= 6:
+            # Destuffed data: [SlaveID, FrameType, Data..., CRC_L, CRC_H]
+            # Position = 4 bytes starting at index 2
+            if len(response) >= 8:
+                position = struct.unpack('<i', response[2:6])[0]
+                self._current_position = position
+                logger.debug(f"Position: {position}")
+                return position
+        logger.debug("Không đọc được vị trí")
+        return None
     
     def read_status(self) -> Optional[int]:
         """
@@ -632,8 +645,9 @@ class EziStepFastechDriver:
         """
         response = self._send_command(FastechCommand.READ_STATUS)
         
-        if response and len(response) >= 8:
-            status_byte = response[5]
+        if response and len(response) >= 4:
+            # Destuffed data: [SlaveID, FrameType, Status_Data..., CRC_L, CRC_H]
+            status_byte = response[2] if len(response) > 2 else 0
             self._current_status = status_byte
             return status_byte
         else:
