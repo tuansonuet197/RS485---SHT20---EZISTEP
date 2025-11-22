@@ -194,39 +194,231 @@ Phụ lục C: Datasheet thiết bị
 
 ## 2.1. Sơ đồ khối kết nối của hệ thống
 
-*(Nội dung sẽ bổ sung - vẽ sơ đồ)*
+### 2.1.1. Kiến trúc 3 tầng theo chuẩn công nghiệp
+
+Hệ thống được thiết kế theo **mô hình 3 tầng tự động hóa công nghiệp** (Pyramid of Automation):
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                    MASTER (PC)                           │
-│               Python Application                          │
-│           PyQt5 GUI + Multi-threading                    │
-└─────────────┬───────────────────────┬────────────────────┘
-              │                       │
-         USB-Serial CH340        USB-Serial FTDI
-              │                       │
-         RS-485 (COM1)           RS-485 (COM2)
-         9600 bps                115200 bps
-         Modbus RTU              FASTECH Protocol
-              │                       │
-              │                       │
-    ┌─────────▼─────────┐    ┌────────▼──────────┐
-    │   SLAVE 1 (ID=1)  │    │   SLAVE 2 (ID=2)  │
-    │  SHT20 Sensor     │    │  Ezi-STEP Driver  │
-    │  Temp & Humidity  │    │  Stepper Motor    │
-    └───────────────────┘    └───────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│  TẦNG 3: SUPERVISION & MONITORING LEVEL (Tầng giám sát)           │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  PyQt5 GUI Application - HMI Interface                       │  │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │  │
+│  │  │ Tab 1: SHT20 │  │ Tab 2: Motor │  │ Tab 3: Automation│   │  │
+│  │  │ - Graphs     │  │ - Control    │  │ - Status & Rules │   │  │
+│  │  │ - Display    │  │ - Monitor    │  │ - Activity Log   │   │  │
+│  │  └──────────────┘  └──────────────┘  └──────────────────┘   │  │
+│  │                                                               │  │
+│  │  Chức năng:                                                   │  │
+│  │  • Hiển thị dữ liệu real-time (nhiệt độ, độ ẩm, vị trí motor)│  │
+│  │  • Data visualization (đồ thị, LCD numbers)                  │  │
+│  │  • Data logging (CSV export)                                 │  │
+│  │  • Giao diện điều khiển thủ công                             │  │
+│  │  • Giám sát trạng thái automation                            │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────┘
+                             ▲ │
+                   Signal/Slot (PyQt5)
+                             │ ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  TẦNG 2: CONTROL & AUTOMATION LEVEL (Tầng điều khiển)             │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │  AutomationController Module (logic/automation_simple.py)    │  │
+│  │  ┌────────────────────────────────────────────────────────┐  │  │
+│  │  │  4 Automation Rules (Decision Logic):                  │  │  │
+│  │  │  • Rule 1: IF Temp > 28°C  → Motor ON (CW, 8000pps)   │  │  │
+│  │  │  • Rule 2: IF Temp < 26°C  → Motor OFF                │  │  │
+│  │  │  • Rule 3: IF Humid > 65%  → Motor OFF                │  │  │
+│  │  │  • Rule 4: IF Humid < 40%  → Motor ON (CW, 5000pps)   │  │  │
+│  │  └────────────────────────────────────────────────────────┘  │  │
+│  │                                                               │  │
+│  │  Master RS-485 Communication Drivers:                        │  │
+│  │  ┌──────────────────────┐  ┌──────────────────────┐         │  │
+│  │  │ drivers/             │  │ drivers/             │         │  │
+│  │  │ sht20_modbus.py      │  │ ezistep_fastech.py   │         │  │
+│  │  │ (Modbus RTU Master)  │  │ (FASTECH Master)     │         │  │
+│  │  └──────────────────────┘  └──────────────────────┘         │  │
+│  │                                                               │  │
+│  │  Chức năng:                                                   │  │
+│  │  • Xử lý logic điều khiển tự động (IF-THEN-ELSE)             │  │
+│  │  • Ra quyết định dựa trên dữ liệu sensor                     │  │
+│  │  • Gửi lệnh điều khiển xuống Field Level                     │  │
+│  │  • Quản lý giao thức Modbus RTU và FASTECH                   │  │
+│  │  • Master của cả 2 mạng RS-485                               │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────┘
+                    ▲                            ▲
+                    │                            │
+             RS-485 Modbus RTU            RS-485 FASTECH
+             COM1: 9600 bps               COM2: 115200 bps
+             Data: 8 bits                 Data: 8 bits
+             Parity: None                 Parity: None
+             Stop: 1 bit                  Stop: 1 bit
+             Slave ID: 1                  Slave ID: 2
+                    │                            │
+                    ▼                            ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  TẦNG 1: FIELD LEVEL (Tầng hiện trường - Sensors & Actuators)     │
+│  ┌───────────────────────────┐   ┌────────────────────────────┐   │
+│  │  SLAVE 1: SHT20 Sensor    │   │  SLAVE 2: Ezi-STEP Driver  │   │
+│  │  ┌─────────────────────┐  │   │  ┌──────────────────────┐  │   │
+│  │  │ • Temperature sensor│  │   │  │ • Stepper Motor      │  │   │
+│  │  │   (-40°C ~ +125°C)  │  │   │  │ • Position Encoder   │  │   │
+│  │  │ • Humidity sensor   │  │   │  │ • Driver circuit     │  │   │
+│  │  │   (0% ~ 100% RH)    │  │   │  │   (24V, 4.2A/phase)  │  │   │
+│  │  └─────────────────────┘  │   │  └──────────────────────┘  │   │
+│  │  Modbus Slave ID: 1       │   │  FASTECH Slave ID: 2       │   │
+│  └───────────────────────────┘   └────────────────────────────┘   │
+│                                                                     │
+│  Chức năng:                                                         │
+│  • Thu thập dữ liệu môi trường (nhiệt độ, độ ẩm)                   │
+│  • Thực thi lệnh điều khiển (quay motor, dừng, về gốc)             │
+│  • Phản hồi trạng thái về Master (position, alarm, running)        │
+│  • Giao tiếp qua RS-485 (chống nhiễu, khoảng cách xa)              │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
-**Thông số kết nối:**
+### 2.1.2. Giải thích chi tiết từng tầng
 
-| Mạng | Thiết bị | Cổng | Tốc độ | Giao thức | Slave ID |
-|------|----------|------|--------|-----------|----------|
-| Mạng 1 | SHT20 Sensor | COM1 | 9600 bps | Modbus RTU | 1 |
-| Mạng 2 | Ezi-STEP Driver | COM2 | 115200 bps | FASTECH | 2 |
+#### **TẦNG 3 - SUPERVISION LEVEL (Tầng giám sát):**
+
+**Vai trò:** Tầng giao diện người - máy (HMI), giám sát và điều khiển thủ công
+
+**Thành phần:**
+- `gui/main_window.py`: Cửa sổ chính, quản lý 3 tabs
+- `gui/sht20_tab.py`: Tab hiển thị nhiệt độ/độ ẩm với đồ thị real-time
+- `gui/ezistep_tab.py`: Tab điều khiển động cơ (JOG, Move, Homing)
+- `gui/automation_tab.py`: Tab giám sát automation và cấu hình rules
+
+**Chức năng:**
+1. **Visualization:** Đồ thị real-time (PyQtGraph), LCD numbers
+2. **Manual Control:** Người dùng có thể điều khiển motor thủ công
+3. **Monitoring:** Theo dõi trạng thái hệ thống 24/7
+4. **Data Logging:** Ghi lại dữ liệu ra file CSV để phân tích sau
+5. **Alarm Display:** Hiển thị cảnh báo khi vượt ngưỡng
+
+**Công nghệ:** Python PyQt5 (Fusion style), PyQtGraph
+
+---
+
+#### **TẦNG 2 - CONTROL LEVEL (Tầng điều khiển):**
+
+**Vai trò:** Tầng logic điều khiển, ra quyết định tự động
+
+**Thành phần:**
+- `logic/automation_simple.py`: AutomationController với 4 rules
+- `drivers/sht20_modbus.py`: Modbus RTU Master driver
+- `drivers/ezistep_fastech.py`: FASTECH Protocol Master driver
+
+**Chức năng:**
+1. **Decision Making:** 
+   - Rule 1: Nhiệt độ cao → Bật quạt làm mát (motor CW)
+   - Rule 2: Nhiệt độ thấp → Tắt quạt (tiết kiệm năng lượng)
+   - Rule 3/4: Điều khiển độ ẩm (máy phun sương)
+
+2. **Master Communication:**
+   - Polling slaves theo chu kỳ (SHT20: 1s, Motor: 100ms)
+   - Gửi lệnh điều khiển xuống Field Level
+   - Xử lý CRC, timeout, retry
+
+3. **Protocol Handling:**
+   - Modbus RTU: Function codes 0x03/0x04
+   - FASTECH: Byte stuffing, custom frame format
+
+**Công nghệ:** Python threading, pyserial, pymodbus
+
+---
+
+#### **TẦNG 1 - FIELD LEVEL (Tầng hiện trường):**
+
+**Vai trò:** Tầng cảm biến và actuator, giao tiếp trực tiếp với môi trường
+
+**Thành phần:**
+
+**Slave 1 - SHT20 Sensor:**
+- **Loại:** Digital Temperature & Humidity Sensor
+- **Giao thức:** Modbus RTU Slave
+- **Dải đo:** -40°C ~ +125°C, 0% ~ 100% RH
+- **Độ chính xác:** ±0.3°C (typ), ±3% RH (typ)
+- **Response time:** < 8 seconds
+- **Registers:** 0x0001 (Temp), 0x0002 (Humid)
+
+**Slave 2 - Ezi-STEP Driver:**
+- **Loại:** Stepper Motor Driver
+- **Model:** EzT-NDR-42M (Fastech)
+- **Giao thức:** FASTECH Protocol Slave
+- **Motor type:** 2-phase stepper
+- **Max current:** 4.2A/phase
+- **Voltage:** 24-48V DC
+- **Resolution:** 1000 pulse/rev (default)
+- **Commands:** SERVO ON/OFF, JOG, MOVE, HOMING, READ STATUS
+
+**Chức năng:**
+1. Thu thập dữ liệu môi trường liên tục
+2. Thực thi lệnh điều khiển từ Master
+3. Phản hồi trạng thái hiện tại (position, alarm, running)
+4. Tự động báo lỗi khi có vấn đề (overload, overheat...)
+
+---
+
+### 2.1.3. Luồng dữ liệu trong hệ thống 3 tầng
+
+**Hướng lên (Bottom-Up): Field → Control → Supervision**
+
+```
+1. SHT20 đo nhiệt độ/độ ẩm
+   ↓
+2. Modbus RTU Master đọc data (Tầng 2)
+   ↓
+3. AutomationController xử lý (check rules)
+   ↓
+4. GUI cập nhật hiển thị (Tầng 3)
+```
+
+**Hướng xuống (Top-Down): Supervision → Control → Field**
+
+```
+1. User click "JOG CW" trên GUI (Tầng 3)
+   ↓
+2. Signal gửi đến EziStepDriver (Tầng 2)
+   ↓
+3. FASTECH Master gửi lệnh 0x37 (MOVE_VELOCITY)
+   ↓
+4. Motor quay (Tầng 1)
+```
+
+**Automation Loop (Tầng 2 tự quyết định):**
+
+```
+1. SHT20 → Temp = 29°C (Tầng 1)
+   ↓
+2. AutomationController: Rule 1 trigger! (Tầng 2)
+   ↓
+3. Gửi lệnh JOG CW 8000pps → Motor (Tầng 2 → Tầng 1)
+   ↓
+4. GUI hiển thị "Motor RUNNING (AUTO)" (Tầng 3)
+```
+
+---
+
+### 2.1.4. Bảng thông số kết nối chi tiết
+
+| Tầng | Tên | Công nghệ | Giao tiếp | Tốc độ | Role |
+|------|-----|-----------|-----------|--------|------|
+| 3 | PyQt5 GUI | Python, Qt5 | Signal/Slot | N/A | HMI |
+| 2 | Automation Controller | Python | QThread | N/A | Logic |
+| 2 | Modbus Master | pymodbus | RS-485 (COM1) | 9600 bps | Master |
+| 2 | FASTECH Master | pyserial | RS-485 (COM2) | 115200 bps | Master |
+| 1 | SHT20 Sensor | Modbus RTU | RS-485 | 9600 bps | Slave 1 |
+| 1 | Ezi-STEP Driver | FASTECH | RS-485 | 115200 bps | Slave 2 |
+
+**Cấu hình serial:**
+- **Mạng 1:** 9600 bps, 8 data bits, No parity, 1 stop bit (8N1)
+- **Mạng 2:** 115200 bps, 8 data bits, No parity, 1 stop bit (8N1)
 
 **Nguồn điện:**
 - Motor Power: 24V DC, 3A (cho driver + động cơ)
-- Logic Power: 5V USB (cho vi điều khiển)
+- Logic Power: 5V từ USB (cho sensor và vi điều khiển)
 
 ---
 
