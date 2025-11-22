@@ -9,6 +9,8 @@ import logging
 
 from .sht20_tab import SHT20Tab
 from .ezistep_tab import EziStepTab
+from .automation_tab import AutomationTab
+from logic.automation_simple import AutomationController
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,10 @@ class MainWindow(QMainWindow):
         self.ezistep_driver = ezistep_driver
         self.data_logger = data_logger
         self.config = config
+        
+        # Khởi tạo automation controller
+        self.automation_controller = AutomationController(motor_controller=ezistep_driver)
+        logger.info("Automation controller initialized")
         
         self.init_ui()
         
@@ -78,9 +84,18 @@ class MainWindow(QMainWindow):
             self.config['EZISTEP_CONFIG'],
             self.config['GUI_CONFIG']
         )
+        self.automation_tab = AutomationTab(
+            self.automation_controller,
+            self.sht20_driver,
+            self.ezistep_driver
+        )
         
         self.tabs.addTab(self.sht20_tab, "🌡️ Mạng 1: SHT20 - Giám Sát Môi Trường")
         self.tabs.addTab(self.ezistep_tab, "⚙️ Mạng 2: Ezi-STEP - Điều Khiển Động Cơ")
+        self.tabs.addTab(self.automation_tab, "🤖 Điều Khiển Tự Động")
+        
+        # Kết nối SHT20 data với automation tab
+        self.sht20_tab.data_updated.connect(self.on_sht20_data_updated)
         
         self.setCentralWidget(self.tabs)
         
@@ -160,6 +175,11 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar.showMessage("⚠️ Không có log đang chạy", 3000)
     
+    def on_sht20_data_updated(self, temperature, humidity):
+        """Xử lý khi có dữ liệu mới từ SHT20"""
+        # Gửi dữ liệu đến automation tab
+        self.automation_tab.update_sensor_data(temperature, humidity)
+    
     def log_system_data(self):
         """Ghi dữ liệu hệ thống vào log"""
         if not self.data_logger.is_logging:
@@ -205,6 +225,7 @@ class MainWindow(QMainWindow):
         <ul>
             <li>🌡️ Mạng 1: Cảm biến SHT20 (Modbus RTU @ 9600 bps)</li>
             <li>⚙️ Mạng 2: Động cơ Ezi-STEP (FASTECH @ 115200 bps)</li>
+            <li>🤖 Điều khiển tự động dựa trên nhiệt độ/độ ẩm</li>
             <li>📊 Đồ thị thời gian thực</li>
             <li>📝 Ghi log dữ liệu CSV</li>
         </ul>
@@ -242,6 +263,10 @@ class MainWindow(QMainWindow):
             
             self.sht20_tab.cleanup()
             self.ezistep_tab.cleanup()
+            
+            # Tắt automation
+            if self.automation_controller.enabled:
+                self.automation_controller.set_enabled(False)
             
             event.accept()
         else:

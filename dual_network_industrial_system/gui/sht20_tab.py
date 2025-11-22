@@ -4,7 +4,7 @@ Hiển thị nhiệt độ, độ ẩm và đồ thị realtime
 """
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
                              QPushButton, QLabel, QLCDNumber, QTextEdit)
-from PyQt5.QtCore import QTimer, Qt
+from PyQt5.QtCore import QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QColor
 import pyqtgraph as pg
 from collections import deque
@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 class SHT20Tab(QWidget):
     """Tab điều khiển và giám sát cảm biến SHT20"""
+    
+    # Signal để gửi dữ liệu cho automation tab
+    data_updated = pyqtSignal(float, float)  # (temperature, humidity)
     
     def __init__(self, driver, driver_config, gui_config):
         super().__init__()
@@ -316,6 +319,9 @@ class SHT20Tab(QWidget):
                 # Cập nhật LCD
                 self.lcd_temp.display(f"{temp:.1f}")
                 self.lcd_humid.display(f"{humid:.1f}")
+                
+                # Phát signal cho automation tab
+                self.data_updated.emit(temp, humid)
                 
                 # Cập nhật đồ thị
                 self.time_counter += 1
