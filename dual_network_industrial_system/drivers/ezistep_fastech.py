@@ -65,6 +65,10 @@ class EziStepFastechDriver:
         self._current_position = 0
         self._current_status = MotorStatus.IDLE
         
+        # Motor running state tracking for automation
+        self.is_running = False
+        self.current_speed = 0
+        
         # Protocol constants - Ezi-MOTION Plus-R format
         self.HEADER = bytes([0xAA, 0xCC])  # Corrected: 0xCC not 0x55
         self.TAIL = bytes([0xAA, 0xEE])    # Corrected: 0xEE not 0x0D
@@ -492,6 +496,10 @@ class EziStepFastechDriver:
             logger.info("✅ Động cơ đã dừng")
             self._current_status = MotorStatus.IDLE
             
+            # Update running state tracking for automation
+            self.is_running = False
+            self.current_speed = 0
+            
             # Chỉ track position cho JOG thuần túy (không phải JOG simulation)
             if getattr(self, '_is_pure_jog', False):
                 if hasattr(self, '_jog_start_time') and hasattr(self, '_jog_speed') and hasattr(self, '_jog_direction'):
@@ -566,6 +574,9 @@ class EziStepFastechDriver:
         
         if response:
             self._current_status = MotorStatus.MOVING
+            # Update running state tracking for automation
+            self.is_running = True
+            self.current_speed = speed
             logger.info("✅ JOG command sent successfully (format app hãng: speed + direction)")
             return True
         else:

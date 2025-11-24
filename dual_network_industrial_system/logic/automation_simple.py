@@ -55,7 +55,7 @@ class HighTempMotorStartRule(AutomationRule):
         """Thực hiện: Bật motor CW"""
         if self.motor_controller:
             try:
-                self.motor_controller.jog_move("CW", self.motor_speed)
+                self.motor_controller.jog_move(self.motor_speed, direction=1)  # CW direction
                 self.trigger_count += 1
                 self.last_trigger_time = datetime.now()
                 return True, f"Motor started CW at {self.motor_speed}pps"
@@ -145,7 +145,7 @@ class LowHumidityMotorStartRule(AutomationRule):
         """Thực hiện: Bật motor CW"""
         if self.motor_controller:
             try:
-                self.motor_controller.jog_move("CW", self.motor_speed)
+                self.motor_controller.jog_move(self.motor_speed, direction=1)  # CW direction
                 self.trigger_count += 1
                 self.last_trigger_time = datetime.now()
                 return True, f"Motor started CW at {self.motor_speed}pps (low humidity)"
@@ -254,11 +254,18 @@ class AutomationController(QObject):
     def update_rule_threshold(self, rule_name, param_name, value):
         """Cập nhật ngưỡng của rule"""
         rule = self.get_rule_by_name(rule_name)
-        if rule and hasattr(rule, param_name):
-            setattr(rule, param_name, value)
-            logger.info(f"Rule '{rule_name}': {param_name} = {value}")
-            return True
-        return False
+        if rule:
+            if hasattr(rule, param_name):
+                old_value = getattr(rule, param_name)
+                setattr(rule, param_name, value)
+                logger.info(f"✅ Rule '{rule_name}': {param_name} changed {old_value} → {value}")
+                return True
+            else:
+                logger.warning(f"⚠️ Rule '{rule_name}' doesn't have attribute '{param_name}'")
+                return False
+        else:
+            logger.warning(f"⚠️ Rule '{rule_name}' not found")
+            return False
         
     def get_statistics(self):
         """Lấy thống kê automation"""

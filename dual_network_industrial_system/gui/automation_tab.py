@@ -221,14 +221,14 @@ class AutomationTab(QWidget):
         rule1_layout.addWidget(self.rule1_check)
         rule1_layout.addWidget(QLabel("Nếu Temp >"))
         self.rule1_temp = QDoubleSpinBox()
-        self.rule1_temp.setRange(20.0, 50.0)
+        self.rule1_temp.setRange(0.0, 80.0)
         self.rule1_temp.setValue(28.0)
         self.rule1_temp.setSuffix(" °C")
         self.rule1_temp.valueChanged.connect(lambda v: self.update_rule_param("High Temperature Motor Start", "temp_threshold", v))
         rule1_layout.addWidget(self.rule1_temp)
         rule1_layout.addWidget(QLabel("→ Bật motor CW tại"))
         self.rule1_speed = QSpinBox()
-        self.rule1_speed.setRange(1000, 10000)
+        self.rule1_speed.setRange(1000, 50000)
         self.rule1_speed.setValue(8000)
         self.rule1_speed.setSuffix(" pps")
         self.rule1_speed.valueChanged.connect(lambda v: self.update_rule_param("High Temperature Motor Start", "motor_speed", v))
@@ -244,7 +244,7 @@ class AutomationTab(QWidget):
         rule2_layout.addWidget(self.rule2_check)
         rule2_layout.addWidget(QLabel("Nếu Temp <"))
         self.rule2_temp = QDoubleSpinBox()
-        self.rule2_temp.setRange(15.0, 40.0)
+        self.rule2_temp.setRange(0.0, 80.0)
         self.rule2_temp.setValue(26.0)
         self.rule2_temp.setSuffix(" °C")
         self.rule2_temp.valueChanged.connect(lambda v: self.update_rule_param("Low Temperature Motor Stop", "temp_threshold", v))
@@ -261,7 +261,7 @@ class AutomationTab(QWidget):
         rule3_layout.addWidget(self.rule3_check)
         rule3_layout.addWidget(QLabel("Nếu độ ẩm >"))
         self.rule3_humid = QDoubleSpinBox()
-        self.rule3_humid.setRange(50.0, 90.0)
+        self.rule3_humid.setRange(0.0, 100.0)
         self.rule3_humid.setValue(65.0)
         self.rule3_humid.setSuffix(" %")
         self.rule3_humid.valueChanged.connect(lambda v: self.update_rule_param("High Humidity Motor Stop", "humid_threshold", v))
@@ -278,14 +278,14 @@ class AutomationTab(QWidget):
         rule4_layout.addWidget(self.rule4_check)
         rule4_layout.addWidget(QLabel("Nếu độ ẩm <"))
         self.rule4_humid = QDoubleSpinBox()
-        self.rule4_humid.setRange(20.0, 60.0)
+        self.rule4_humid.setRange(0.0, 100.0)
         self.rule4_humid.setValue(40.0)
         self.rule4_humid.setSuffix(" %")
         self.rule4_humid.valueChanged.connect(lambda v: self.update_rule_param("Low Humidity Motor Start", "humid_threshold", v))
         rule4_layout.addWidget(self.rule4_humid)
         rule4_layout.addWidget(QLabel("→ Bật motor CW tại"))
         self.rule4_speed = QSpinBox()
-        self.rule4_speed.setRange(1000, 10000)
+        self.rule4_speed.setRange(1000, 50000)
         self.rule4_speed.setValue(5000)
         self.rule4_speed.setSuffix(" pps")
         self.rule4_speed.valueChanged.connect(lambda v: self.update_rule_param("Low Humidity Motor Start", "motor_speed", v))
@@ -350,7 +350,27 @@ class AutomationTab(QWidget):
     def on_enable_changed(self, state):
         """Xử lý khi checkbox enable/disable thay đổi"""
         enabled = (state == Qt.Checked)
+        
+        # Cập nhật trạng thái automation
         self.automation.set_enabled(enabled)
+        
+        # Cập nhật UI ngay lập tức
+        if enabled:
+            self.status_label.setText("🟢 BẬT")
+            self.status_label.setStyleSheet("color: green;")
+            self.add_log("🤖 Đã bật điều khiển tự động")
+        else:
+            self.status_label.setText("⚫ TẮT")
+            self.status_label.setStyleSheet("color: gray;")
+            self.add_log("🤖 Đã tắt điều khiển tự động")
+            
+            # QUAN TRỌNG: Dừng motor khi tắt automation
+            if self.ezistep and self.ezistep.is_connected and self.ezistep.is_running:
+                try:
+                    self.ezistep.stop()
+                    self.add_log("🛑 Đã dừng motor khi tắt automation")
+                except Exception as e:
+                    self.add_log(f"⚠️ Lỗi khi dừng motor: {e}", color="red")
         
     @pyqtSlot(bool)
     def on_automation_status_changed(self, enabled):
@@ -396,7 +416,18 @@ class AutomationTab(QWidget):
         """Cập nhật parameter của rule"""
         success = self.automation.update_rule_threshold(rule_name, param_name, value)
         if success:
-            self.add_log(f"Cập nhật quy tắc '{rule_name}': {param_name} = {value}")
+            # Hiển thị giá trị dễ đọc
+            if param_name == "motor_speed":
+                display_value = f"{value} pps"
+            elif "temp" in param_name:
+                display_value = f"{value} °C"
+            elif "humid" in param_name:
+                display_value = f"{value} %"
+            else:
+                display_value = str(value)
+            self.add_log(f"⚙️ Cập nhật '{rule_name}': {param_name} = {display_value}")
+        else:
+            self.add_log(f"⚠️ Không thể cập nhật '{rule_name}': {param_name}", color="orange")
             
     def update_sensor_data(self, temperature, humidity):
         """Cập nhật dữ liệu từ SHT20"""
@@ -404,11 +435,15 @@ class AutomationTab(QWidget):
         self.current_humid = humidity
         
         # Cập nhật motor status từ ezistep controller
-        if self.ezistep:
-            # Giả sử ezistep có method get_status()
+        if self.ezistep and self.ezistep.is_connected:
             self.current_motor_status = {
-                'running': getattr(self.ezistep, 'is_running', False),
-                'speed': getattr(self.ezistep, 'current_speed', 0)
+                'running': self.ezistep.is_running,
+                'speed': self.ezistep.current_speed
+            }
+        else:
+            self.current_motor_status = {
+                'running': False,
+                'speed': 0
             }
             
         # Gửi dữ liệu cho automation controller
@@ -506,3 +541,17 @@ class AutomationTab(QWidget):
         """Xóa activity log"""
         self.log_text.clear()
         self.add_log("Đã xóa nhật ký hoạt động")
+    
+    def cleanup(self):
+        """Cleanup khi đóng tab - Dừng motor nếu đang chạy"""
+        # Tắt automation trước
+        if self.automation.enabled:
+            self.automation.set_enabled(False)
+        
+        # Dừng motor nếu đang chạy
+        if self.ezistep and self.ezistep.is_connected and self.ezistep.is_running:
+            try:
+                self.ezistep.stop()
+                logger.info("🛑 Automation cleanup: Motor stopped")
+            except Exception as e:
+                logger.error(f"Error stopping motor in cleanup: {e}")

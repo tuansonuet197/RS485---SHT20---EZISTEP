@@ -264,9 +264,8 @@ class MainWindow(QMainWindow):
             self.sht20_tab.cleanup()
             self.ezistep_tab.cleanup()
             
-            # Tắt automation
-            if self.automation_controller.enabled:
-                self.automation_controller.set_enabled(False)
+            # Cleanup automation tab (tắt automation và dừng motor)
+            self.automation_tab.cleanup()
             
             event.accept()
         else:
