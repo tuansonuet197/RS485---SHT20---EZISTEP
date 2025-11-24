@@ -25,18 +25,19 @@ class FastechCommand(IntEnum):
     # Lệnh 0x2E là READ STATUS, KHÔNG PHẢI JOG!
     # JOG thực tế là MOVE_VELOCITY (0x37) với speed parameter
     MOVE_VELOCITY = 0x37  # JOG/Move with velocity - ĐÂY MỚI LÀ JOG THẬT!
-    MOVE_ABSOLUTE = 0x38
-    MOVE_RELATIVE = 0x39
-    STOP = 0x31
+    MOVE_ABSOLUTE = 0x38  # Move to absolute position
+    MOVE_RELATIVE = 0x39  # Move relative distance
+    STOP = 0x31  # Stop motor (Frame Type 0x31 từ Ezi3.py)
     SERVO_ON = 0x83
     SERVO_OFF = 0x84
     ALARM_RESET = 0x04
-    READ_POSITION = 0x0C
-    READ_STATUS = 0x0D
+    READ_POSITION = 0x01  # FAS_GetCommandPos
+    READ_STATUS = 0x40  # FAS_GetAxisStatus (0x40 từ Ezi2.py)
     SET_SPEED = 0x57  # Set speed and acceleration parameters
     TEACHING_MODE = 0x91  # Enable/Disable teaching mode
     CLEAR_POSITION = 0x20  # Clear position counter
     SET_POSITION = 0x2B  # Set current position
+    WRITE_PARAM = 0x82  # Write parameter
 
 
 class MotorStatus(IntEnum):
@@ -478,38 +479,46 @@ class EziStepFastechDriver:
     
     def stop(self) -> bool:
         """
-        Dừng động cơ (E-stop / emergency stop)
+        Dừng động cơ - Command 0x31 (FAS_MoveStop từ Ezi3.py)
+        Không có data (Sending: 0 byte)
         
         Returns:
             bool: True nếu thành công
         """
-        logger.info("Dừng động cơ...")
-        response = self._send_command(FastechCommand.STOP)
+        logger.info("🛑 Dừng động cơ (CMD 0x31 - MoveStop)...")
+        response = self._send_command(FastechCommand.STOP, b'')  # Không có data
         
         if response:
-            logger.info("Động cơ đã dừng")
+            logger.info("✅ Động cơ đã dừng")
             self._current_status = MotorStatus.IDLE
             
-            # Nếu đang JOG, ước tính position từ thời gian JOG
-            if hasattr(self, '_jog_start_time') and hasattr(self, '_jog_speed') and hasattr(self, '_jog_direction'):
-                import time
-                elapsed = time.time() - self._jog_start_time
-                estimated_distance = int(self._jog_speed * elapsed)
-                if self._jog_direction == 0:  # JOG- (CCW)
-                    estimated_distance = -estimated_distance
-                self._current_position += estimated_distance
-                logger.debug(f"📍 Position tracked (JOG stop): {self._current_position} pulse (est. {'+' if estimated_distance > 0 else ''}{estimated_distance})")
-                # Clear JOG tracking data
+            # Chỉ track position cho JOG thuần túy (không phải JOG simulation)
+            if getattr(self, '_is_pure_jog', False):
+                if hasattr(self, '_jog_start_time') and hasattr(self, '_jog_speed') and hasattr(self, '_jog_direction'):
+                    import time
+                    elapsed = time.time() - self._jog_start_time
+                    estimated_distance = int(self._jog_speed * elapsed)
+                    if self._jog_direction == 0:  # JOG- (CCW)
+                        estimated_distance = -estimated_distance
+                    self._current_position += estimated_distance
+                    logger.debug(f"📍 Position tracked (pure JOG): {self._current_position} pulse (+{estimated_distance})")
+            
+            # Clear JOG tracking data
+            if hasattr(self, '_jog_start_time'):
                 delattr(self, '_jog_start_time')
+            if hasattr(self, '_jog_speed'):
                 delattr(self, '_jog_speed')
+            if hasattr(self, '_jog_direction'):
                 delattr(self, '_jog_direction')
+            if hasattr(self, '_is_pure_jog'):
+                delattr(self, '_is_pure_jog')
             
             return True
         else:
-            logger.error("Không thể dừng động cơ")
+            logger.error("❌ Không thể dừng động cơ")
             return False
     
-    def jog_move(self, speed: int, direction: int = 1) -> bool:
+    def jog_move(self, speed: int, direction: int = 1, is_simulation: bool = False) -> bool:
         """
         Di chuyển Jog (MoveVelocity) - THEO APP HÃNG (Serial Port Monitor)
         
@@ -524,6 +533,7 @@ class EziStepFastechDriver:
         Args:
             speed: Tốc độ (pps), mặc định 10000 như app hãng
             direction: 1 = CW (JOG+), 0 = CCW (JOG-)
+            is_simulation: True nếu gọi từ move_absolute/relative (không track position)
             
         Returns:
             bool: True nếu thành công
@@ -536,11 +546,15 @@ class EziStepFastechDriver:
         dir_str = "JOG+ ➡️" if direction > 0 else "JOG- ⬅️"
         logger.info(f"🏃 {dir_str} @ {speed} pps (MOVE_VELOCITY 0x37)")
         
-        # Lưu thông tin JOG để track position khi dừng
-        import time
-        self._jog_start_time = time.time()
-        self._jog_speed = speed
-        self._jog_direction = direction
+        # Lưu thông tin JOG để track position khi dừng (CHỈ cho JOG thuần túy)
+        if not is_simulation:
+            import time
+            self._jog_start_time = time.time()
+            self._jog_speed = speed
+            self._jog_direction = direction
+            self._is_pure_jog = True  # Đánh dấu JOG thuần túy
+        else:
+            self._is_pure_jog = False  # JOG simulation, không track
         
         # Format ĐÚNG: Speed(4 bytes unsigned LE) + Direction(1 byte)
         # Direction: 1 = CW, 0 = CCW
@@ -560,7 +574,13 @@ class EziStepFastechDriver:
     
     def move_absolute(self, position: int, speed: int) -> bool:
         """
-        Di chuyển tuyệt đối đến vị trí
+        Di chuyển tuyệt đối đến vị trí (Command 0x38)
+        
+        CHÚ Ý: Lệnh này CẦN acceleration time!
+        Format đầy đủ có thể là: Position(4B) + Speed(4B) + AccelTime(2B) + DecelTime(2B)
+        
+        THAY THẾ: Dùng Teaching Mode để KHÔNG CẦN tham số phức tạp
+        → Sử dụng JOG để di chuyển đến vị trí!
         
         Args:
             position: Vị trí đích (pulse)
@@ -569,31 +589,51 @@ class EziStepFastechDriver:
         Returns:
             bool: True nếu thành công
         """
-        if not (self.config['limits']['min_position'] <= position <= self.config['limits']['max_position']):
-            logger.error(f"Vị trí {position} ngoài giới hạn")
-            return False
+        logger.info(f"🎯 Move Absolute → {position} (qua JOG simulation)")
         
-        # Data: Position(4 bytes signed LE) + Speed(4 bytes unsigned LE)
-        command_data = struct.pack('<iI', position, speed)
+        # Đọc vị trí hiện tại
+        current_pos = self._current_position
+        distance = position - current_pos
         
-        logger.info(f"🎯 Move Absolute: Position={position}, Speed={speed}")
-        logger.debug(f"📦 Data: {command_data.hex().upper()}")
+        if abs(distance) < 10:
+            logger.info("✅ Đã ở vị trí đích")
+            return True
         
-        response = self._send_command(FastechCommand.MOVE_ABSOLUTE, command_data)
+        # Dùng JOG để di chuyển
+        direction = 1 if distance > 0 else 0
+        logger.info(f"   🎯 ABS: Khoảng cách {distance} pulse, Tốc độ YÊU CẦU: {speed} pps, Hướng: {'CW' if direction else 'CCW'}")
         
-        if response:
-            self._current_status = MotorStatus.MOVING
-            # Track position AFTER command sent successfully
+        # ⚠️ QUAN TRỌNG: STOP trước khi JOG với tốc độ mới
+        import time
+        self.stop()
+        time.sleep(0.1)  # Chờ driver xử lý STOP
+        
+        # JOG với tốc độ đã cho (is_simulation=True)
+        if self.jog_move(speed, direction, is_simulation=True):
+            # ⚠️ ĐƠN GIẢN: Tính thời gian = khoảng cách / tốc độ
+            import time
+            move_time = abs(distance) / speed
+            logger.info(f"   ⏱️ Thời gian: {move_time:.3f}s (distance {abs(distance)} / speed {speed})")
+            
+            # Chờ đến khi hoàn thành
+            time.sleep(move_time)
+            
+            # Dừng motor
+            self.stop()
             self._current_position = position
-            logger.info(f"✅ ABS Move sent → Position tracked: {self._current_position} pulse")
+            logger.info(f"✅ Đã đến vị trí {position}")
             return True
         else:
-            logger.error("❌ Move absolute failed")
+            logger.error("❌ JOG simulation thất bại")
             return False
     
     def move_relative(self, distance: int, speed: int) -> bool:
         """
-        Di chuyển tương đối (từ vị trí hiện tại)
+        Di chuyển tương đối (Command 0x39)
+        
+        CHÚ Ý: Lệnh này CẦN acceleration time!
+        
+        THAY THẾ: Dùng JOG để mô phỏng relative move
         
         Args:
             distance: Khoảng cách di chuyển (pulse, âm = ngược chiều)
@@ -602,22 +642,39 @@ class EziStepFastechDriver:
         Returns:
             bool: True nếu thành công
         """
-        # Data: Distance(4 bytes signed LE) + Speed(4 bytes unsigned LE)
-        command_data = struct.pack('<iI', distance, speed)
+        dir_str = "➡️" if distance > 0 else "⬅️"
+        logger.info(f"{dir_str} Move Relative {distance} pulse (qua JOG simulation)")
         
-        logger.info(f"➡️ Move Relative: Distance={distance}, Speed={speed}")
-        logger.debug(f"📦 Data: {command_data.hex().upper()}")
+        if abs(distance) < 10:
+            logger.info("✅ Khoảng cách quá nhỏ, bỏ qua")
+            return True
         
-        response = self._send_command(FastechCommand.MOVE_RELATIVE, command_data)
+        # Dùng JOG để di chuyển
+        direction = 1 if distance > 0 else 0
+        logger.info(f"   🚀 REL: Khoảng cách {distance} pulse, Tốc độ YÊU CẦU: {speed} pps, Hướng: {'CW' if direction else 'CCW'}")
         
-        if response:
-            self._current_status = MotorStatus.MOVING
-            # Track position AFTER command sent successfully
+        # ⚠️ QUAN TRỌNG: STOP trước khi JOG với tốc độ mới
+        # Đảm bảo driver chấp nhận tốc độ mới
+        import time
+        self.stop()
+        time.sleep(0.1)  # Chờ driver xử lý STOP
+        
+        if self.jog_move(speed, direction, is_simulation=True):
+            # ⚠️ ĐƠN GIẢN: Tính thời gian = khoảng cách / tốc độ
+            import time
+            move_time = abs(distance) / speed
+            logger.info(f"   ⏱️ Thời gian: {move_time:.3f}s (distance {abs(distance)} / speed {speed})")
+            
+            # Chờ đến khi hoàn thành
+            time.sleep(move_time)
+            
+            # Dừng
+            self.stop()
             self._current_position += distance
-            logger.info(f"✅ REL Move sent → Position tracked: {self._current_position} pulse")
+            logger.info(f"✅ Đã di chuyển {distance} pulse → Position: {self._current_position}")
             return True
         else:
-            logger.error("❌ Move relative failed")
+            logger.error("❌ JOG simulation thất bại")
             return False
     
     def homing(self, speed: int = 1000) -> bool:
@@ -685,41 +742,54 @@ class EziStepFastechDriver:
     
     def read_status(self) -> Optional[int]:
         """
-        Đọc trạng thái động cơ
+        Đọc trạng thái động cơ - Command 0x40 (FAS_GetAxisStatus từ Ezi2.py)
         
-        Response format: [SlaveID][FrameType][CommStatus][Data...][CRC]
-        CommStatus: 0x00 = OK, 0x80 = ACK, 0x82 = ACK + ERROR
+        Response: 4 bytes Status Flag Value (unsigned long)
+        Status flags (từ EZISTEP_AXISSTATUS):
+        - Bit 0: FFLAG_ERRORALL
+        - Bit 14: FFLAG_ERRMOTORPOWER (0x00004000)
+        - Bit 22: FFLAG_PTSTOPPED (0x00400000)
+        - Bit 27: FFLAG_MOTIONING (0x08000000)
         
         Returns:
-            int: Communication status (0x00 = OK)
+            int: Status flag value hoặc None nếu lỗi
         """
-        response = self._send_command(FastechCommand.READ_STATUS)
+        logger.debug("📊 Đọc trạng thái (CMD 0x40 - GetAxisStatus)...")
+        response = self._send_command(FastechCommand.READ_STATUS, b'')  # Không có data
         
-        if response and len(response) >= 4:
+        if response and len(response) >= 7:  # SlaveID + FrameType + CommStatus + Data(4B) + CRC(2B)
             # response[0] = Slave ID
-            # response[1] = Frame Type (echo)
-            # response[2] = COMM STATUS (NOT motor status!)
-            # response[3:] = Actual data
+            # response[1] = Frame Type (0x40 echo)
+            # response[2] = Comm Status
+            # response[3:7] = Status Flag (4 bytes unsigned long LE)
+            
             comm_status = response[2]
             
-            # Check comm status
-            if comm_status == 0x00:
-                logger.info("✅ Communication OK")
-                self._current_status = comm_status
-                return comm_status
-            elif comm_status == 0x80:
-                logger.info("✅ ACK")
-                self._current_status = comm_status
-                return comm_status
-            elif comm_status & 0x02:
-                logger.warning(f"⚠️ Driver báo lỗi! Comm Status: 0x{comm_status:02X}")
-                self._current_status = comm_status
-                return comm_status
+            if comm_status == 0x00 or comm_status == 0x80:
+                # Parse 4-byte status flag
+                if len(response) >= 7:
+                    status_flag = struct.unpack('<I', response[3:7])[0]  # 4 bytes unsigned long
+                    
+                    # Decode status flags
+                    status_bits = []
+                    if status_flag & 0x00000001:
+                        status_bits.append("❌ERROR_ALL")
+                    if status_flag & 0x00004000:
+                        status_bits.append("⚡MOTOR_POWER_ERR")
+                    if status_flag & 0x00400000:
+                        status_bits.append("⏸PT_STOPPED")
+                    if status_flag & 0x08000000:
+                        status_bits.append("🏃MOTIONING")
+                    
+                    logger.info(f"✅ Status: 0x{status_flag:08X} [{' | '.join(status_bits) if status_bits else 'OK'}]")
+                    
+                    self._current_status = status_flag
+                    return status_flag
             else:
-                logger.debug(f"Comm Status: 0x{comm_status:02X}")
-                self._current_status = comm_status
-                return comm_status
+                logger.warning(f"⚠️ Comm Status: 0x{comm_status:02X}")
+                return None
         else:
+            logger.warning("⚠️ Không nhận được phản hồi status hoặc data quá ngắn")
             return None
     
     def get_current_position(self) -> int:

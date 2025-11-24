@@ -182,15 +182,16 @@ class EziStepTab(QWidget):
         pos_layout.addWidget(QLabel("pulse"))
         move_layout.addLayout(pos_layout)
         
-        speed2_layout = QHBoxLayout()
-        speed2_layout.addWidget(QLabel("Tốc độ:"))
+        # Tốc độ chung cho ABS, DEC, INC
+        move_speed_layout = QHBoxLayout()
+        move_speed_layout.addWidget(QLabel("Tốc độ:"))
         self.spin_move_speed = QSpinBox()
-        self.spin_move_speed.setRange(100, 50000)
+        self.spin_move_speed.setRange(1000, 50000)
         self.spin_move_speed.setValue(10000)
         self.spin_move_speed.setSingleStep(1000)
-        speed2_layout.addWidget(self.spin_move_speed)
-        speed2_layout.addWidget(QLabel("pps"))
-        move_layout.addLayout(speed2_layout)
+        move_speed_layout.addWidget(self.spin_move_speed)
+        move_speed_layout.addWidget(QLabel("pps"))
+        move_layout.addLayout(move_speed_layout)
         
         self.btn_abs_move = QPushButton("📍 ABS")
         self.btn_abs_move.setMinimumHeight(35)
@@ -198,6 +199,9 @@ class EziStepTab(QWidget):
         self.btn_abs_move.clicked.connect(self.on_abs_move)
         self.btn_abs_move.setEnabled(False)
         move_layout.addWidget(self.btn_abs_move)
+        
+        # Xóa ô tốc độ riêng DEC/INC (dùng chung spin_move_speed)
+        self.spin_dec_inc_speed = self.spin_move_speed  # Alias để code tương thích
         
         dec_inc_layout = QHBoxLayout()
         self.btn_dec_move = QPushButton("⬅ DEC")
@@ -221,37 +225,7 @@ class EziStepTab(QWidget):
         
         main.addLayout(control_layout)
         
-        # ROW 4: Relative Move
-        rel_group = QGroupBox("🔄 Di Chuyển Tương Đối")
-        rel_layout = QHBoxLayout()
-        
-        rel_layout.addWidget(QLabel("Khoảng:"))
-        self.spin_rel_dist = QSpinBox()
-        self.spin_rel_dist.setRange(-100000, 100000)
-        self.spin_rel_dist.setValue(0)
-        self.spin_rel_dist.setSingleStep(1000)
-        rel_layout.addWidget(self.spin_rel_dist)
-        rel_layout.addWidget(QLabel("pulse"))
-        
-        rel_layout.addWidget(QLabel("Tốc độ:"))
-        self.spin_rel_speed = QSpinBox()
-        self.spin_rel_speed.setRange(100, 10000)
-        self.spin_rel_speed.setValue(2000)
-        self.spin_rel_speed.setSingleStep(100)
-        rel_layout.addWidget(self.spin_rel_speed)
-        rel_layout.addWidget(QLabel("pps"))
-        
-        self.btn_move_rel = QPushButton("▶️ Di Chuyển")
-        self.btn_move_rel.setMinimumHeight(40)
-        self.btn_move_rel.setStyleSheet("background: #673AB7; color: white; font-weight: bold;")
-        self.btn_move_rel.clicked.connect(self.on_move_relative)
-        self.btn_move_rel.setEnabled(False)
-        rel_layout.addWidget(self.btn_move_rel)
-        
-        rel_group.setLayout(rel_layout)
-        main.addWidget(rel_group)
-        
-        # ROW 5: Log
+        # ROW 4: Log
         log_group = QGroupBox("📋 Nhật Ký")
         log_layout = QVBoxLayout()
         self.txt_log = QTextEdit()
@@ -327,7 +301,6 @@ class EziStepTab(QWidget):
             self.btn_abs_move.setEnabled(True)
             self.btn_dec_move.setEnabled(True)
             self.btn_inc_move.setEnabled(True)
-            self.btn_move_rel.setEnabled(True)
     
     def on_servo_off(self):
         """Tắt Servo"""
@@ -342,7 +315,6 @@ class EziStepTab(QWidget):
             self.btn_abs_move.setEnabled(False)
             self.btn_dec_move.setEnabled(False)
             self.btn_inc_move.setEnabled(False)
-            self.btn_move_rel.setEnabled(False)
     
     def on_stop(self):
         """Dừng motor"""
@@ -352,11 +324,11 @@ class EziStepTab(QWidget):
     
     def on_home(self):
         """Home - Di chuyển động cơ về vị trí 0"""
-        speed = self.spin_move_speed.value()
-        self.log_message(f"🏠 Đang Home về vị trí 0 @ {speed} pps...")
+        home_speed = 50000  # ⚠️ Tốc độ Home cố định 50000 pps (nhanh)
+        self.log_message(f"🏠 Đang Home về vị trí 0 @ {home_speed} pps...")
         
         # Di chuyển tuyệt đối về vị trí 0
-        if self.driver.move_absolute(0, speed):
+        if self.driver.move_absolute(0, home_speed):
             self.log_message("✅ Home hoàn tất - Động cơ đã về vị trí 0")
         else:
             self.log_message("❌ Home thất bại")
@@ -379,38 +351,34 @@ class EziStepTab(QWidget):
         """JOG released - stop"""
         if self.driver.stop():
             self.lbl_motor_status.setText("⏸ STOPPED")
+            self.update_status()  # Cập nhật vị trí sau khi JOG
     
     def on_abs_move(self):
-        """ABS Move"""
+        """Absolute Move"""
         position = self.spin_cmd_pos.value()
-        speed = self.spin_move_speed.value()
-        if self.driver.move_absolute(position, speed):
-            self.log_message(f"📍 ABS Move: {position} @ {speed} pps")
+        move_speed = self.spin_move_speed.value()  # ⚠️ Dùng tốc độ Move riêng
+        if self.driver.move_absolute(position, move_speed):
+            self.log_message(f"📍 ABS Move: {position} @ {move_speed} pps")
             self.lbl_motor_status.setText("🏃 MOVING")
+            self.update_status()  # Cập nhật vị trí ngay
     
     def on_dec_move(self):
         """DEC Move"""
         distance = -abs(self.spin_cmd_pos.value())
-        speed = self.spin_move_speed.value()
-        if self.driver.move_relative(distance, speed):
-            self.log_message(f"◀️ DEC: {distance} @ {speed} pps")
+        move_speed = self.spin_move_speed.value()  # ⚠️ Dùng tốc độ Move chung
+        if self.driver.move_relative(distance, move_speed):
+            self.log_message(f"◀️ DEC: {distance} @ {move_speed} pps")
             self.lbl_motor_status.setText("🏃 DEC")
+            self.update_status()  # Cập nhật vị trí ngay
     
     def on_inc_move(self):
         """INC Move"""
         distance = abs(self.spin_cmd_pos.value())
-        speed = self.spin_move_speed.value()
-        if self.driver.move_relative(distance, speed):
-            self.log_message(f"▶️ INC: +{distance} @ {speed} pps")
+        move_speed = self.spin_move_speed.value()  # ⚠️ Dùng tốc độ Move chung
+        if self.driver.move_relative(distance, move_speed):
+            self.log_message(f"▶️ INC: +{distance} @ {move_speed} pps")
             self.lbl_motor_status.setText("🏃 INC")
-    
-    def on_move_relative(self):
-        """Relative Move"""
-        distance = self.spin_rel_dist.value()
-        speed = self.spin_rel_speed.value()
-        if self.driver.move_relative(distance, speed):
-            self.log_message(f"🔄 REL: {distance} @ {speed} pps")
-            self.lbl_motor_status.setText("🏃 MOVING")
+            self.update_status()  # Cập nhật vị trí ngay
     
     def update_status(self):
         """Cập nhật trạng thái"""
