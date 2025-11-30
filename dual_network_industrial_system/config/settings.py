@@ -112,6 +112,10 @@ LOG_CONFIG = {
         'motor_status'
     ],
     'log_interval': 5000        # ms (ghi log mỗi 5 giây)
+    ,
+    # Thêm cấu hình Thingspeak
+    'thingspeak_api_key': 'HCIHKEE00P4KK2JK',
+    'thingspeak_url': 'https://api.thingspeak.com/update'
 }
 
 # ==================== SYSTEM SETTINGS ====================

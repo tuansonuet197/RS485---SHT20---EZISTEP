@@ -48,6 +48,16 @@ class AutomationTab(QWidget):
         self.update_timer.timeout.connect(self.update_ui)
         self.update_timer.start(500)  # Cập nhật mỗi 0.5s
         
+        # Timer để đồng bộ chế độ tự động với Thingspeak
+        self.thingspeak_timer = QTimer()
+        self.thingspeak_timer.timeout.connect(self.sync_automation_with_thingspeak)
+        self.thingspeak_timer.start(5000)  # 5 giây/lần
+
+        # Thông tin Thingspeak (cần sửa đúng channel_id và read_api_key)
+        self.thingspeak_channel_id = 3187134  # Thay bằng channel ID của bạn
+        self.thingspeak_read_api_key = 'PT2JXYRX7GFGBOBD'  # Thay bằng Read API Key của bạn
+        self._last_cloud_mode = None
+
     def init_ui(self):
         """Khởi tạo giao diện"""
         main_layout = QVBoxLayout()
@@ -555,3 +565,31 @@ class AutomationTab(QWidget):
                 logger.info("🛑 Automation cleanup: Motor stopped")
             except Exception as e:
                 logger.error(f"Error stopping motor in cleanup: {e}")
+                
+    def sync_automation_with_thingspeak(self):
+        """Đồng bộ trạng thái automation với Thingspeak field3"""
+        import requests
+        url = f'https://api.thingspeak.com/channels/{self.thingspeak_channel_id}/fields/3/last.json?api_key={self.thingspeak_read_api_key}'
+        try:
+            resp = requests.get(url, timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                value = data.get('field3')
+                if value is not None:
+                    try:
+                        mode = int(value)
+                    except Exception:
+                        return
+                    # Nếu trạng thái cloud khác trạng thái hiện tại thì cập nhật
+                    if mode != self._last_cloud_mode:
+                        self._last_cloud_mode = mode
+                        # Cập nhật checkbox (nếu khác)
+                        checked = (mode == 1)
+                        if self.enable_checkbox.isChecked() != checked:
+                            self.enable_checkbox.blockSignals(True)
+                            self.enable_checkbox.setChecked(checked)
+                            self.enable_checkbox.blockSignals(False)
+                            # Gọi xử lý bật/tắt automation
+                            self.on_enable_changed(Qt.Checked if checked else Qt.Unchecked)
+        except Exception as e:
+            logger.warning(f"Lỗi đồng bộ automation với Thingspeak: {e}")

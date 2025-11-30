@@ -8,6 +8,9 @@ import logging
 from datetime import datetime
 from typing import Optional
 
+# Thêm import requests cho Thingspeak
+import requests
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,6 +33,30 @@ class DataLogger:
         if not os.path.exists(config['directory']):
             os.makedirs(config['directory'])
             logger.info(f"Đã tạo thư mục logs: {config['directory']}")
+
+        # Thingspeak config (nếu có)
+        self.thingspeak_api_key = config.get('thingspeak_api_key')
+        self.thingspeak_url = config.get('thingspeak_url', 'https://api.thingspeak.com/update')
+
+    def send_to_thingspeak(self, temperature=None, humidity=None, motor_position=None, motor_status=None):
+        """Gửi dữ liệu lên Thingspeak nếu có API key"""
+        if not self.thingspeak_api_key:
+            return
+        payload = {
+            'api_key': self.thingspeak_api_key,
+            'field1': temperature if temperature is not None else '',
+            'field2': humidity if humidity is not None else '',
+            'field3': motor_position if motor_position is not None else '',
+            'field4': motor_status if motor_status is not None else '',
+        }
+        try:
+            resp = requests.post(self.thingspeak_url, data=payload, timeout=5)
+            if resp.status_code == 200:
+                logger.info(f"Đã gửi dữ liệu lên Thingspeak: {payload}")
+            else:
+                logger.warning(f"Gửi Thingspeak thất bại: {resp.status_code} - {resp.text}")
+        except Exception as e:
+            logger.error(f"Lỗi gửi Thingspeak: {e}")
     
     def start_logging(self) -> bool:
         """
@@ -103,6 +130,9 @@ class DataLogger:
             # Ghi vào file
             self.csv_writer.writerow(row)
             self.log_file.flush()  # Đảm bảo dữ liệu được ghi ngay
+
+            # Gửi Thingspeak nếu cấu hình
+            self.send_to_thingspeak(temperature, humidity, motor_position, motor_status)
             
         except Exception as e:
             logger.error(f"Lỗi khi ghi log: {e}")
